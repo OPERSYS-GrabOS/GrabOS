@@ -6,13 +6,30 @@ unsigned int col = 0;		//col & row corresponds to the monitor
 unsigned int row = 0;
 char *vidptr = (char*)0xb8000; 	//video mem begins here.
 unsigned int cursor = 0;	//var where cursor is remembered
+unsigned int MAX_COL = 80;
+unsigned int MAX_ROW = 25;
+
+static inline void outb(unsigned short port, unsigned char val)
+{
+    asm volatile ( "outb %0, %1" : : "a"(val), "Nd"(port) );
+    /* TODO: Is it wrong to use 'N' for the port? It's not a 8-bit constant. */
+    /* TODO: Should %1 be %w1? */
+}
 
 /*Moves the cursor using data from col and row*/
 void moveCursor() {
-	if(col > 80)
+	int position;
+
+	if(col > MAX_COL)
 		col = 0;
 
 	cursor = ((row * 80) + col) * 2;
+	position = cursor/2;
+
+	outb(0x3D4, 0x0F);
+	outb(0x3D5, (unsigned char)(position&0xFF));
+	outb(0x3D4, 0x0E);
+	outb(0x3D5, (unsigned char)((position>>8)&0xFF));
 }
 
 int absoluteVal(int num) {
@@ -21,9 +38,14 @@ int absoluteVal(int num) {
 	else return -num;
 }
 
+void sleep(int delay) {
+	int i;	
+	for(i = 0; i < delay * 100000; i++);
+}
+
 void clrscr() {
 	unsigned int j = 0;
-	while(j < 80 * 25 * 2) {
+	while(j < MAX_COL * MAX_ROW * 2) {
 		//blank character
 		vidptr[j] = ' ';
 		//attribute-byte: light grey on black screen	
@@ -84,19 +106,47 @@ void printInt(int num) {
 		numTemp /= 10;
 	}	
 	
-	printstr(numstr);
+	printstr(numstr);	
+}
+
+void printHex(char* hex) {
+	unsigned int j = 0;			//var used in traversing char* str;	
+
+	while(hex[j] != '\0') {
+		if(hex[j] != '\n') {
+			vidptr[cursor] = hex[j];
+			vidptr[cursor+1] = 0x07;
+			col++;
+		} else {
+			col = 0;
+			++row;
+		}
+		moveCursor();
+		++j;	
+	}
+}
+
+void scroll() {
+	int i;
+	
+	i = MAX_COL * MAX_ROW * 2;
+	while(i >= 0) {
+		vidptr[i] = vidptr[i - 160];	
+		i--;
+	}
+
+	for(i = 1; i < 160; i += 2) 
+		vidptr[i] = 0x07;
+	row = 24;
+	moveCursor();
 	
 }
 
 void kmain(void)
 {	
-	unsigned int i = 0;
-	unsigned int j = 0;
-	//clear all
+	int i;
 	clrscr();
-	
-	printInt(0);
-	printstr("\n");
+	printstr("\n");	
 	printstr("             ======================================================\n");
 	printstr("                     /^--^\\     /^--^\\     /^--^\\     /^--^\\\n");
 	printstr("                    |      |   |      |   |      |   |      |\n");
@@ -117,6 +167,9 @@ void kmain(void)
 	printstr("                     | | |_ | '__/ _` | '_ \\| |  | |\\___ \\ \n");
 	printstr("                     | |__| | | | (_| | |_) | |__| |____) |\n");
 	printstr("                      \\_____|_|  \\__,_|_.__/ \\____/|_____/ \n");
-	
+	sleep(10000);
+	clrscr();
+
+	printstr("C:\\");
 	return;
 }
