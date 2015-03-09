@@ -11,12 +11,17 @@ section .text
 
 global start
 global keyboard_handler
+global timer
 global read_port
 global write_port
 global load_idt
+global timer_handler
+global asmtest
 
-extern kmain	        ;kmain is defined in the c file
-extern keyboard_handler_main;
+extern kmain	        
+extern keyboard_handler_main
+extern timer_handler_main
+extern test
 
 load_idt:
 	mov edx, [esp + 4]
@@ -41,6 +46,18 @@ write_port:
 keyboard_handler:                 
 	call    keyboard_handler_main
 	iretd
+
+;TIMER Interrupt Handling
+timer_handler:
+	call	timer_handler_main
+	iretd
+
+asmtest:
+	mov 	eax, [esp + 4]
+	push	eax
+	call 	test	
+	pop 	eax
+	ret
 
 start:
   cli 			;block interrupts

@@ -14,21 +14,40 @@
 #define IDT_SIZE 256
 #define INTERRUPT_GATE 0x8e
 #define KERNEL_CODE_SEGMENT_OFFSET 0x08
+#define PARAM_LIMIT 9
 
 #define ENTER_KEY_CODE 0x1C
 
+#define BLACK 0x00
+#define BLUE 0x01
+#define GREEN 0x02
+#define CYAN 0x03
+#define RED 0x04
+#define MAGENTA 0x05
+#define ORANGE 0x06
+#define WHITE 0x07
+
 extern unsigned char keyboard_map[128];
+extern unsigned char hexNumbers[16];
 extern void keyboard_handler(void);
+extern void timer_handler(void);
 extern char read_port(unsigned short port);
 extern void write_port(unsigned short port, unsigned char data);
 extern void load_idt(unsigned long *idt_ptr);
+extern void asmtest(int);
 
 unsigned int col = 0;		//col & row corresponds to the monitor
 unsigned int row = 0;
+unsigned int buffer_counter = 0;
 char *vidptr = (char*)0xb8000; 	//video mem begins here.
 unsigned int cursor = 0;	//var where cursor is remembered
 char* headline = "GrabOS>";
-char hexNumbers[16] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'};
+unsigned char console_buffer[1000];
+unsigned char command[25];
+unsigned char param[100];
+unsigned char intParam[10];	//for arithmetic parameters
+unsigned char cap_flag = 0;
+unsigned char* console_option;
 
 struct IDT_entry{
 	unsigned short int offset_lowerbits;
@@ -38,7 +57,95 @@ struct IDT_entry{
 	unsigned short int offset_higherbits;
 };
 
+struct marquee{
+	unsigned char str[100];
+	unsigned int line;
+	unsigned int begin_pos;		//position of the first char
+	unsigned int end_pos;		//position of the last char
+	unsigned int direction;		//direction marquee is moving || 1-right ;; 0-left
+	unsigned int color;
+} mar;
+
 struct IDT_entry IDT[IDT_SIZE];
+struct marquee MRQ[MAX_ROW];
+unsigned int MRQ_CTR = 0;
+
+static inline void outb(unsigned short, unsigned char);
+static inline char inb(unsigned short);
+
+void idt_init(void);
+void kb_init(void);
+
+void move_cursor();
+int absoluteVal(int);
+void sleep(int);
+void clrscr();
+void clrLine(int);
+
+int strcmp(char*, char*);
+void strcopy(char*, char*);
+int len(char*);
+
+void printStr(char*);
+void printInt(int);
+void printHex(int);
+
+void scroll();
+void shiftRight(int);
+void shiftLeft(int);
+
+void keyboard_handler_main(void);
+void timer_handler_main(void);
+
+void doCommand();
+void processKey(char);
+void commandSay();
+
+void moveMarquee(struct marquee*);
+void removeMarquee(int index);
+char* findOption();
+
+void test(int);
+
+//void kmain(void)
+//{	
+//	idt_init();
+	
+/*	clrscr();
+	printStr("\n");	
+	printStr("             ======================================================\n");
+	printStr("                     /^--^\\     /^--^\\     /^--^\\     /^--^\\\n");
+	printStr("                    |      |   |      |   |      |   |      |\n");
+	printStr("                     \\____/     \\____/     \\____/     \\____/\n");
+	printStr("                    /      \\   /      \\   /      \\   /      \\\n");
+	printStr("                   |        | |        | |        | |        |\n");
+	printStr("                    \\__  __/   \\__  __/   \\__  __/   \\__  __/\n");
+	printStr("             |^|^|^|^|/ /^|^|^|^|^\\ \\^|^|^|^/ /^|^|^|^|^\\ \\^|^|^|^|\n");
+	printStr("             | | | | / /  | | | | |\\ \\| | |/ /| | | | | |\\ \\ | | ||\n");
+	printStr("             | | | | / /  | | | | |\\ \\| | |/ /| | | | | |\\ \\ | | ||\n");
+	printStr("             ########\\ \\###########/ /#####\\ \\###########/ /#######\n");
+	printStr("             | | | | |\\/| | |  | | \\/| | | |\\/| | | | | |\\/ | | | |\n");
+	printStr("             |_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_||\n");
+	printStr("             ======================================================\n");
+	printStr("                       _____           _      ____   _____ \n");
+	printStr("                      / ____|         | |    / __ \\ / ____|\n");
+	printStr("                     | |  __ _ __ __ _| |__ | |  | | (___  \n");
+	printStr("                     | | |_ | '__/ _` | '_ \\| |  | |\\___ \\ \n");
+	printStr("                     | |__| | | | (_| | |_) | |__| |____) |\n");
+	printStr("                      \\_____|_|  \\__,_|_.__/ \\____/|_____/ \n");
+	sleep(1000);
+	clrscr();
+*/
+	//printStr(headline);
+	//kb_init();
+
+	//while(1);
+//	clrscr();
+//	asmtest(100);
+//	printStr("Success");
+//	while(1);
+//	return;
+//}
 
 static inline void outb(unsigned short port, unsigned char val)
 {
@@ -54,17 +161,25 @@ static inline char inb(unsigned short port)
 
 void idt_init(void)
 {
-	unsigned long keyboard_address;
+	unsigned long func_address;
 	unsigned long idt_address;
 	unsigned long idt_ptr[2];
 
 	/* populate IDT entry of keyboard's interrupt */
-	keyboard_address = (unsigned long)keyboard_handler;
-	IDT[0x21].offset_lowerbits = keyboard_address & 0xffff;
+	func_address = (unsigned long)keyboard_handler;
+	IDT[0x21].offset_lowerbits = func_address & 0xffff;
 	IDT[0x21].selector = KERNEL_CODE_SEGMENT_OFFSET;
 	IDT[0x21].zero = 0;
 	IDT[0x21].type_attr = INTERRUPT_GATE;
-	IDT[0x21].offset_higherbits = (keyboard_address & 0xffff0000) >> 16;
+	IDT[0x21].offset_higherbits = (func_address & 0xffff0000) >> 16;
+
+	/* populate IDT entry of timer's interrupt */
+	func_address = (unsigned long) timer_handler;
+	IDT[0x20].offset_lowerbits = func_address & 0xffff;
+	IDT[0x20].selector = KERNEL_CODE_SEGMENT_OFFSET;
+	IDT[0x20].zero = 0;
+	IDT[0x20].type_attr = INTERRUPT_GATE;
+	IDT[0x20].offset_higherbits = (func_address & 0xffff0000) >> 16;
 
 	/*     Ports
 	*	 PIC1	PIC2
@@ -103,29 +218,56 @@ void idt_init(void)
 	idt_ptr[1] = idt_address >> 16 ;
 
 	load_idt(idt_ptr);
+	write_port(0x21 , 0xFE);
 }
 
-void kb_init(void)
+void kb_init(void) {
+	write_port(0x21, 0xFC);
+}
+
+//http://www.programmingsimplified.com/c/source-code/c-program-convert-string-to-integer-without-using-atoi-function
+int ParseInt(char a[]) 
 {
-	/* 0xFD is 11111101 - enables only IRQ1 (keyboard)*/
-	write_port(0x21 , 0xFD);
+	  int c, sign, offset, n;
+	 
+	  if (a[0] == '-') {  // Handle negative integers
+	    sign = -1;
+	  }
+	 
+	  if (sign == -1) {  // Set starting position to convert
+	    offset = 1;
+	  }
+	  else {
+	    offset = 0;
+	  }
+	 
+	  n = 0;
+	 
+	  for (c = offset; a[c] != '\0'; c++) {
+	    n = n * 10 + a[c] - '0';
+	  }
+	 
+	  if (sign == -1) {
+	    n = -n;
+	  }
+	 
+	  return n;
 }
 
-void keyboard_handler_main(void) {
-	unsigned char status;
-	char keycode;
-
-	/* write EOI */
-	write_port(0x20, 0x20);
-
-	status = read_port(KEYBOARD_STATUS_PORT);
-	/* Lowest bit of status will be set if buffer is not empty */
-	if (status & 0x01) {
-		keycode = read_port(KEYBOARD_DATA_PORT);
-		if(keycode < 0)
-			return;
-		vidptr[cursor++] = keyboard_map[keycode];
-		vidptr[cursor++] = 0x07;	
+void scroll() {
+	int ctr;
+	for(ctr = 0; ctr < SCREENSIZE - 160; ctr += 2) {
+		vidptr[ctr] = vidptr[ctr + 160];
+		vidptr[ctr + 1] = vidptr[ctr + 161];	
+	}
+	for(;ctr < SCREENSIZE; ctr += 2) {
+		vidptr[ctr] = ' ';
+		vidptr[ctr + 1] = WHITE;
+	}
+	for(ctr = 0; ctr < MRQ_CTR; ctr++) {
+		if(MRQ[ctr].line < 0)
+			removeMarquee(ctr);
+		MRQ[ctr].line--;
 	}
 }
 
@@ -133,8 +275,16 @@ void keyboard_handler_main(void) {
 void moveCursor() {
 	int position;
 
-	if(col > MAX_COL)
+	if(col > MAX_COL) {
 		col = 0;
+		row++;
+	}
+	
+	if(row >= MAX_ROW) 
+	{
+		scroll();
+		row = 24;		
+	}
 
 	cursor = ((row * 80) + col) * 2;
 	position = cursor/2;
@@ -156,18 +306,76 @@ void sleep(int delay) {
 	for(i = 0; i < delay * 100000; i++);
 }
 
+int strcmp(char* str1, char* str2) {
+	int i = 0, ret = 0;
+	while(str1[i] != '\0' && str2[i] != '\0') {
+		if(str1[i] != str2[i]) {
+			return 1;
+		}
+		i++;
+	}
+	return ret;
+}
+
+void strcopy(char* dest, char* src) {
+	int i = 0;
+
+	while(src[i] != '\0') {
+		dest[i] = src[i];
+		i++;	
+	}
+}
+
+int len(char* str) {
+	int length = 0;
+	while(str[length] != '\0')
+		length++;
+
+	return length;
+}
+
+void getCommand() {
+	int i, j;
+	for(i = 0; console_buffer[i] != ' ' && i < 25; i++) {
+		command[i] = console_buffer[i];
+	}i++;
+	for(j = 0; console_buffer[i] != '\0'; i++, j++) {
+		param[j] = console_buffer[i];
+	}
+	param[j] = '\0';
+}
+
 void clrscr() {
 	unsigned int j = 0;
 	while(j < MAX_COL * MAX_ROW * 2) {
 		//blank character
 		vidptr[j] = ' ';
 		//attribute-byte: light grey on black screen	
-		vidptr[j+1] = 0x07; 		
+		vidptr[j+1] = WHITE; 		
 		j = j + 2;
 	}
 	col = 0;
 	row = 0;
+	MRQ_CTR = 0;
 	moveCursor();
+}
+
+/*Main use for marquees*/
+void clrLine(int line) {
+	unsigned int j;
+	unsigned int pos;
+	
+	for(j = 0; j < MAX_COL; j++) {
+		pos = ((line * 80) + j) * 2;
+		vidptr[pos] = ' ';
+		vidptr[pos + 1] = WHITE;	
+	}
+}
+
+void clrstr(char* str) {
+	unsigned int i;
+	for(i = 0; str[i] != '\0'; i++)
+		str[i] = '\0';
 }
 
 void printStr(char *str) {
@@ -176,7 +384,7 @@ void printStr(char *str) {
 	while(str[j] != '\0') {
 		if(str[j] != '\n') {
 			vidptr[cursor] = str[j];
-			vidptr[cursor+1] = 0x07;
+			vidptr[cursor+1] = WHITE;
 			col++;
 		} else {
 			col = 0;
@@ -213,9 +421,7 @@ void printInt(int num) {
 			numstr[j] = charTemp;
 		}
 		printStr(numstr);
-	} 
-	
-	
+	} 	
 }
 
 void printHex(int hex) {
@@ -242,45 +448,248 @@ void printHex(int hex) {
 	printStr(bin);
 }
 
-unsigned char get_scancode()
-{
-    unsigned char inputdata, temp;
-   
-	do{
-   		inputdata = inb(0x60);
-		if(inputdata != temp) {
-			clrscr();
-			printStr(headline);
-		 	printHex(inputdata);
-			temp = inputdata;
-		}
-		//printStr(&inputdata);
-	}while(inputdata != 0);
-
-    return inputdata;
-}
-
-void scroll() {
+char* firstParam() {
 	int i;
 	
-	//i = MAX_COL * MAX_ROW * 2;
-	i = 0;
-	while(i >= MAX_COL * MAX_ROW * 2) {
-		vidptr[i] = vidptr[i + 160];	
+	for(i = 0; param[i] != ' ' && i < PARAM_LIMIT; i++) {
+		intParam[i] = param[i];
+	}intParam[i] = '\0';/*terminates ret*/
+	return intParam;
+}
+
+char* secondParam() {
+	int i, j;
+	
+	for(i = 0; param[i] != ' ' && i < 25; i++);i++;
+	for(j = 0; (param[i] != ' ' || param[i] != '\0') && i < 25 && j < 4; i++, j++)
+		intParam[j] = param[i];
+	intParam[j] = '\0';/*terminates ret*/
+	return intParam;
+}
+
+void clearBuffer() {
+	clrstr(console_buffer);
+	clrstr(command);
+	clrstr(param);
+	clrstr(console_option);
+	buffer_counter = 0;	
+}
+
+void commandSay() {
+	printStr(param);
+}
+
+void commandAdd() {
+	int sum = ParseInt(firstParam());	
+	
+	sum += ParseInt(secondParam());
+	printInt(sum);	
+/*
+	int i = 0, j = 0;
+	char* num;	
+
+	while(param[i] != '\0')
+	{
+		if(param[i] != ' ')
+		{
+			num[j] = param[i];
+			num[j+1] = '\0';
+			j++;
+		}
+		else if(param[i] == ' ')
+		{
+			sum += ParseInt(num);
+		}
 		i++;
-		row--;
+		
+	}*/
+	
+}
+
+void commandMarquee() {
+	console_option = findOption();
+
+	if(strcmp(console_option, "-black") == 0)
+		mar.color = BLACK;
+	else if(strcmp(console_option, "-blue") == 0)
+		mar.color = BLUE;
+	else if(strcmp(console_option, "-green") == 0)
+		mar.color = GREEN;
+	else if(strcmp(console_option, "-cyan") == 0)
+		mar.color = CYAN;
+	else if(strcmp(console_option, "-red") == 0)
+		mar.color = RED;
+	else if(strcmp(console_option, "-magenta") == 0)
+		mar.color = MAGENTA;
+	else if(strcmp(console_option, "-orange") == 0)
+		mar.color = ORANGE;
+	else if(strcmp(console_option, "0") == 0 || strcmp(console_option, "-white") == 0)
+		mar.color = WHITE;
+	else {
+		printStr(console_option);
+		printStr(" is not a valid option");
+		return;
 	}
 
-	for(i = 1; i < 160; i += 2) 
-		vidptr[i] = 0x07;
-	moveCursor();
+	strcopy(mar.str, param);
+	mar.line = row;	
+	mar.begin_pos = 0;
+	mar.end_pos = len(mar.str);
+	mar.direction = 1;
 	
+	MRQ[MRQ_CTR] = mar;
+	MRQ_CTR++;
+	
+	clrstr(mar.str);
+}
+
+void doCommand() {
+	getCommand();
+	
+	if(strcmp(command, "say") == 0) {
+		printStr("\n");		
+		commandSay();	
+		printStr("\n");
+	}else if(strcmp(command, "add") == 0) {
+		printStr("\n");		
+		commandAdd();
+		printStr("\n");
+	}else if(strcmp(command, "cls") == 0) {
+		clrscr();	
+	}else if(strcmp(command, "marquee") == 0){
+		printStr("\n");
+		commandMarquee();
+		printStr("\n");
+	}else if(strcmp(command, "clrline") == 0){
+		clrLine(row);
+		printStr("\n");
+	}else{
+		printStr("\nInvalid Command\n");
+	}
+
+	clearBuffer();
+	printStr(headline);
+}
+
+int isChar(char key) {
+	if(key >= 32 && key <= 126)
+		return 1;
+	else return 0;
+}
+
+void processKey(char key) {
+	char in = keyboard_map[key];
+
+	if(cap_flag == 1 && in != '\b' && in == '\n')
+		in -= 32;
+
+	if(key < 0)
+		return;
+	else if(in == '\n'){
+		if(buffer_counter != 0) 
+			doCommand();
+		else {
+			printStr("\n");
+			printStr(headline);	
+		}
+	} else if(keyboard_map[key] == '\b' && buffer_counter > 0) {
+		vidptr[cursor-2] = ' ';
+
+		console_buffer[buffer_counter] = '\0';
+		buffer_counter--;
+		col--;
+	} else if(isChar(keyboard_map[key]) == 1){
+		vidptr[cursor] = keyboard_map[key];
+		vidptr[cursor+1] = WHITE;
+	
+		console_buffer[buffer_counter] = keyboard_map[key];
+		buffer_counter++;
+		console_buffer[buffer_counter] = '\0';
+		col++;	
+	} 
+	moveCursor();
+}
+
+void keyboard_handler_main(void) {
+	unsigned char status;
+	char keycode;
+
+	/* write EOI */
+	write_port(0x20, 0x20);
+
+	status = read_port(KEYBOARD_STATUS_PORT);
+	/* Lowest bit of status will be set if buffer is not empty */
+	if (status & 0x01) {
+		keycode = read_port(KEYBOARD_DATA_PORT);
+		if(keycode == 0x3A) {
+			if(cap_flag == 0)
+				cap_flag = 1;
+			else cap_flag = 0;		
+		} else processKey(keycode);
+	}
+}
+
+void timer_handler_main(void) {
+	int ctr;
+	
+	write_port(0x20, 0x20);
+
+	for(ctr = 0; ctr < MRQ_CTR; ctr++) {
+		moveMarquee(&MRQ[ctr]);
+	}
+}
+
+void moveMarquee(struct marquee* mar) {
+	unsigned int start;
+	unsigned int pos;
+	unsigned int index;
+	
+	if((*mar).direction == 1) {
+		(*mar).begin_pos++;
+		(*mar).end_pos++;	
+		if((*mar).end_pos == MAX_COL)
+			(*mar).direction = 0;
+	} else {
+		(*mar).begin_pos--;
+		(*mar).end_pos--;
+		if((*mar).begin_pos == 0)
+			(*mar).direction = 1;	
+	}
+	clrLine((*mar).line);
+ 	for(start = (*mar).begin_pos, index = 0; index < len((*mar).str); start++, index++){
+		if((*mar).line >= 0) {	
+			pos = (((*mar).line * 80) + start) * 2;
+			vidptr[pos] = (*mar).str[index];
+			vidptr[pos+1] = (*mar).color;
+		}
+  	}			
+}
+
+char* findOption() {
+	int i, j;
+
+	if(param[0] == '-') {
+		for(i = 0; param[i] != ' ' && i < 100; i++)
+			console_option[i] = param[i];
+		console_option[i] = '\0';
+		for(j = 0; param[i] != '\0'; i++, j++)
+			param[j] = param[i];
+
+		param[j] = '\0';
+		return console_option;
+	} else return "0"; 
+}
+
+void test(int x) {
+	x--;
+	printInt(x);
 }
 
 void kmain(void)
 {	
-	int i;
-	clrscr();
+	idt_init();
+	
+/*	clrscr();
 	printStr("\n");	
 	printStr("             ======================================================\n");
 	printStr("                     /^--^\\     /^--^\\     /^--^\\     /^--^\\\n");
@@ -304,11 +713,14 @@ void kmain(void)
 	printStr("                      \\_____|_|  \\__,_|_.__/ \\____/|_____/ \n");
 	sleep(1000);
 	clrscr();
+*/
+	//printStr(headline);
+	//kb_init();
 
-	printStr(headline);
-	idt_init();
-	kb_init();
-
+	//while(1);
+	clrscr();
+	asmtest(100);
+	printStr("Success");
 	while(1);
 	return;
 }
