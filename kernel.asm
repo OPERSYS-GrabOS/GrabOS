@@ -22,6 +22,7 @@ extern kmain
 extern keyboard_handler_main
 extern timer_handler_main
 extern test
+extern test2
 
 load_idt:
 	mov edx, [esp + 4]
@@ -43,8 +44,13 @@ write_port:
 	ret
 	
 ;KEYBOARD Interrupt Handling
-keyboard_handler:                 
+keyboard_handler:     
+	mov	eax, esp
+	push	eax
+            
 	call    keyboard_handler_main
+	
+	pop	eax
 	iretd
 
 ;TIMER Interrupt Handling
@@ -54,9 +60,17 @@ timer_handler:
 
 asmtest:
 	mov 	eax, [esp + 4]
+	push 	eax
+
+	mov	eax, esp
+	add	eax, 4h
 	push	eax
-	call 	test	
+
+	call 	test
+
 	pop 	eax
+	pop 	eax
+
 	ret
 
 start:
