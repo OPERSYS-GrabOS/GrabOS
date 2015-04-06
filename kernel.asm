@@ -66,7 +66,7 @@ asmtest:
 	add	eax, 4h
 	push	eax
 
-	call 	test
+	;call 	test
 
 	pop 	eax
 	pop 	eax
