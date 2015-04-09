@@ -45,12 +45,15 @@ write_port:
 	
 ;KEYBOARD Interrupt Handling
 keyboard_handler:     
-	mov	eax, esp
-	push	eax
+	push 	ebp	
+	push	esp
             
 	call    keyboard_handler_main
 	
-	pop	eax
+	pop	edx
+	pop	ebp
+	mov esp, edx
+
 	iretd
 
 ;TIMER Interrupt Handling

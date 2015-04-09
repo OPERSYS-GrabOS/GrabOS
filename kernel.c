@@ -49,6 +49,8 @@ unsigned char intParam[10];	//for arithmetic parameters
 unsigned char cap_flag = 0;
 unsigned char* console_option;
 
+char numstr[8];
+
 struct IDT_entry{
 	unsigned short int offset_lowerbits;
 	unsigned short int selector;
@@ -66,13 +68,17 @@ struct marquee{
 	unsigned int color;
 } mar;
 
-struct frame{
-	int* EIP;	
-	int* EBP;
-	int* ESP;
-		
-};
+typedef struct process{
+	int eip;	
+	int ebp;
+	int esp;
+	int stack[1024];		
+}processNode;
 
+void prog1();
+void prog2();
+processNode PCS[5];
+int progAdd[2] = {(int)&prog1, (int)&prog2};
 
 struct IDT_entry IDT[IDT_SIZE];
 struct marquee MRQ[MAX_ROW];
@@ -117,16 +123,31 @@ char* findOption();
 int test(int*, int);
 int test2();
 
-void prog1();
-void prog2();
 void kmain(void);
 void puck();
 
+int prg1Ins = 0;
+int prg2Ins = 0;
 
 int prg1;
 int prg2;
 int prgMain;
 int currProg = 0; 
+
+void indi_init_stack(processNode PCS, int progAdd)
+{
+	PCS.ebp = (int)&(PCS.stack[1024]); 
+	PCS.esp = (int)&(PCS.stack[1024]);
+	PCS.eip = progAdd;
+}
+void init_stack()
+{
+	int i = 0;
+	for(i=0; i<2; i++)
+	{
+		indi_init_stack(PCS[i], progAdd[i]);
+	}
+}
 
 //void kmain(void)
 //{	
@@ -421,17 +442,16 @@ void printInt(int num) {
 	int ASCII_VALUE = 48;
 	int numTemp;
 	int i, j;
-	char* numstr;
 	char charTemp;
 	int ctr = 0;
 	 
-	numTemp = num;
 
 	if(num < 0)
 		printStr("-");
 
 	num = absoluteVal(num);
-	
+	numTemp = num;
+
 	if(num == 0) {
 		printStr("0");
 	} else {
@@ -441,13 +461,18 @@ void printInt(int num) {
 			ctr++;	
 		}
 		numTemp = num;
-		for(i = ctr; i>=0; i--)
-		{
-			numstr[i] = ((numTemp % 10) + ASCII_VALUE);
-			numTemp /= 10;
-		}
-		numstr[ctr + 1] = '\0';
-		printStr(numstr);
+		//if(ctr >= 8) {
+			for(i = 0; i < 8; i++)
+				numstr[i] = '\0';
+			numstr[ctr] = '\0';
+			ctr--;
+			for(i = ctr; i>=0; i--)
+			{
+				numstr[i] = ((numTemp % 10) + ASCII_VALUE);
+				numTemp /= 10;
+			}
+			printStr(numstr);
+		//} else printStr("Integer too long!");	
 		/*
 		for(ctr = 0, numTemp = num; numTemp > 0; ctr++, numTemp /= 10) {
 			numstr[ctr] = ((numTemp % 10) + ASCII_VALUE);
@@ -608,24 +633,49 @@ void doCommand() {
 	clearBuffer();
 	printStr(headline);
 }
-
+process is love! Bakit ka ganito?!
 int isChar(char key) {
 	if(key >= 32 && key <= 126)
 		return 1;
 	else return 0;
 }
 
-void backup(int* pleb) {
+void backup(int* ptr) {
 	if(currProg == 0) {
-		prgMain = (int)*pleb;
-	} else if(currProg == 1) {
-		prg1 = (int)*pleb;
+		prgMain = (int)*ptr;
+	} else if(currProg == 1) 
+	{
+		PCS[0].ebp = ptr[0];
+		PCS[0].eip = ptr[1];
+		PCS[0].esp = ptr[-1];
+
 	} else if(currProg == 2) {
-		prg2 = (int)*pleb;
+		PCS[1].ebp = ptr[0];
+		PCS[1].eip = ptr[1];
+		PCS[1].esp = ptr[-1];
 	}
 }
+//oh my god look at that FACE
+void restore(int* ptr)
+{
+	if(currProg == 0) 
+	{
+		prgMain = (int)*ptr;
+	} 
+	else if(currProg == 1) 
+	{
+		ptr[0] = PCS[0].ebp;
+		PCS[0].stack[1023] = PCS[0].eip;
+		PCS[0].esp-=4;
+		ptr[-1]=PCS[1].esp;
 
-void processKey(char key, int* switcheroo) {
+	} else if(currProg == 2) {
+		PCS[1].ebp = ptr[0];
+		PCS[1].eip = ptr[1];
+		PCS[1].esp = ptr[-1];
+	}	
+}
+void processKey(char key, int* ptr) {
 	char in = keyboard_map[key];
 
 	if(cap_flag == 1 && in != '\b' && in == '\n')
@@ -634,13 +684,14 @@ void processKey(char key, int* switcheroo) {
 	if(key < 0)
 		return;
 	else if(keyboard_map[key] == '1'){
-		backup(switcheroo);
+		backup(ptr);
 		currProg = 1;
-		*switcheroo = (int)prg1;
+			restore(ptr);
+
 	} else if (keyboard_map[key] == '2') {
-		backup(switcheroo);			
-		currProg = 2;		
-		*switcheroo = (int)prg2;
+		backup(ptr);			
+		currProg = 2;
+			restore(ptr);		
 	}
 
 	else if(in == '\n'){
@@ -669,11 +720,11 @@ void processKey(char key, int* switcheroo) {
 	moveCursor();
 }
 
-void keyboard_handler_main(int* switcheroo) {
+void keyboard_handler_main(int* ptr) {
 	unsigned char status;
 	char keycode;
 
-
+	
 	status = read_port(KEYBOARD_STATUS_PORT);
 	/* Lowest bit of status will be set if buffer is not empty */
 	if (status & 0x01) {
@@ -682,9 +733,9 @@ void keyboard_handler_main(int* switcheroo) {
 			if(cap_flag == 0)
 				cap_flag = 1;
 			else cap_flag = 0;		
-		} else processKey(keycode, switcheroo);
+		} else processKey(keycode, ptr);
 	}
-
+	
 	
 	/* write EOI */
 	write_port(0x20, 0x20);
@@ -775,7 +826,6 @@ void prog2()
 	int x = 0, n = 0,i=0;
 	while(1)
 	{
-		printStr("*----------*");
 		printInt(x);
 		printStr(" ");
 		
@@ -820,6 +870,7 @@ void kmain(void)
 	clrscr();
 
 	printStr(headline);
+	init_stack();
 	kb_init();
 	while(1);
 	return;
