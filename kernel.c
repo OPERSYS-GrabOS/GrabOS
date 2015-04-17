@@ -17,6 +17,7 @@
 #define PARAM_LIMIT 9
 
 #define ENTER_KEY_CODE 0x1C
+#define NUM_OF_PROCESSES 6
 
 #define BLACK 0x00
 #define BLUE 0x01
@@ -29,6 +30,7 @@
 
 extern unsigned char keyboard_map[128];
 extern unsigned char hexNumbers[16];
+extern void switch_handler(void);
 extern void keyboard_handler(void);
 extern void timer_handler(void);
 extern char read_port(unsigned short port);
@@ -48,8 +50,9 @@ unsigned char param[100];
 unsigned char intParam[10];	//for arithmetic parameters
 unsigned char cap_flag = 0;
 unsigned char* console_option;
+char numstr[8];	
 
-char numstr[8];
+int currProg = 0;
 
 struct IDT_entry{
 	unsigned short int offset_lowerbits;
@@ -72,17 +75,19 @@ typedef struct process{
 	int eip;	
 	int ebp;
 	int esp;
-	int stack[1024];		
+	int stack[1024];
+	
+	int progNum;
+	char screen[SCREENSIZE];
+	unsigned int col;
+	unsigned int row;
 }processNode;
 
-void prog1();
-void prog2();
-processNode PCS[5];
-int progAdd[2] = {(int)&prog1, (int)&prog2};
-
+processNode PCS[NUM_OF_PROCESSES];
 struct IDT_entry IDT[IDT_SIZE];
 struct marquee MRQ[MAX_ROW];
 
+unsigned int PCS_CTR = 0;
 unsigned int MRQ_CTR = 0;
 
 static inline void outb(unsigned short, unsigned char);
@@ -112,82 +117,48 @@ void shiftLeft(int);
 void keyboard_handler_main(int*);
 void timer_handler_main(void);
 
-void doCommand();
+void doCommand(int*);
 void processKey(char, int*);
 void commandSay();
+void commandRun(int*);
 
 void moveMarquee(struct marquee*);
 void removeMarquee(int index);
 char* findOption();
 
-int test(int*, int);
-int test2();
+void switchConsole(int*);
+void createProcess(int*, int, int);
+void restore(int*, int);
+void backup(int*);
 
+void prog1();
+void prog2();
+void prog3();
+void prog4();
+void prog5();
+void switchProg();
 void kmain(void);
-void puck();
 
-int prg1Ins = 0;
-int prg2Ins = 0;
-
-int prg1;
-int prg2;
-int prgMain;
-int currProg = 0; 
-
-void indi_init_stack(processNode PCS, int progAdd)
-{
-	PCS.ebp = (int)&(PCS.stack[1024]); 
-	PCS.esp = (int)&(PCS.stack[1024]);
-	PCS.eip = progAdd;
-}
 void init_stack()
-{
-	int i = 0;
-	for(i=0; i<2; i++)
-	{
-		indi_init_stack(PCS[i], progAdd[i]);
-	}
-}
-
-//void kmain(void)
-//{	
-//	idt_init();
+{	
 	
-/*	clrscr();
-	printStr("\n");	
-	printStr("             ======================================================\n");
-	printStr("                     /^--^\\     /^--^\\     /^--^\\     /^--^\\\n");
-	printStr("                    |      |   |      |   |      |   |      |\n");
-	printStr("                     \\____/     \\____/     \\____/     \\____/\n");
-	printStr("                    /      \\   /      \\   /      \\   /      \\\n");
-	printStr("                   |        | |        | |        | |        |\n");
-	printStr("                    \\__  __/   \\__  __/   \\__  __/   \\__  __/\n");
-	printStr("             |^|^|^|^|/ /^|^|^|^|^\\ \\^|^|^|^/ /^|^|^|^|^\\ \\^|^|^|^|\n");
-	printStr("             | | | | / /  | | | | |\\ \\| | |/ /| | | | | |\\ \\ | | ||\n");
-	printStr("             | | | | / /  | | | | |\\ \\| | |/ /| | | | | |\\ \\ | | ||\n");
-	printStr("             ########\\ \\###########/ /#####\\ \\###########/ /#######\n");
-	printStr("             | | | | |\\/| | |  | | \\/| | | |\\/| | | | | |\\/ | | | |\n");
-	printStr("             |_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_|_||\n");
-	printStr("             ======================================================\n");
-	printStr("                       _____           _      ____   _____ \n");
-	printStr("                      / ____|         | |    / __ \\ / ____|\n");
-	printStr("                     | |  __ _ __ __ _| |__ | |  | | (___  \n");
-	printStr("                     | | |_ | '__/ _` | '_ \\| |  | |\\___ \\ \n");
-	printStr("                     | |__| | | | (_| | |_) | |__| |____) |\n");
-	printStr("                      \\_____|_|  \\__,_|_.__/ \\____/|_____/ \n");
-	sleep(1000);
-	clrscr();
-*/
-	//printStr(headline);
-	//kb_init();
-
-	//while(1);
-//	clrscr();
-//	asmtest(100);
-//	printStr("Success");
-//	while(1);
-//	return;
-//}
+	PCS[0].progNum = 0;
+	PCS[0].ebp = (int)&(PCS[0].stack[1024]); 
+	PCS[0].esp = (int)&(PCS[0].stack[1024]);
+	PCS[0].eip = (int)&switchProg;
+	PCS[1].progNum = 0;
+	PCS[1].ebp = (int)&(PCS[0].stack[1024]); 
+	PCS[1].esp = (int)&(PCS[0].stack[1024]);
+	PCS[1].eip = (int)&kmain;
+	PCS_CTR+=2;
+	currProg = 1;
+	/*PCS[1].ebp = (int)&(PCS[1].stack[1024]); 
+	PCS[1].esp = (int)&(PCS[1].stack[1024]);
+	PCS[1].eip = (int)&prog1;
+	PCS[2].ebp = (int)&(PCS[2].stack[1024]); 
+	PCS[2].esp = (int)&(PCS[2].stack[1024]);
+	PCS[2].eip = (int)&prog2;*/
+}
 
 static inline void outb(unsigned short port, unsigned char val)
 {
@@ -350,14 +321,14 @@ void sleep(int delay) {
 }
 
 int strcmp(char* str1, char* str2) {
-	int i = 0, ret = 0;
+	int i = 0;
 	while(str1[i] != '\0' && str2[i] != '\0') {
 		if(str1[i] != str2[i]) {
 			return 1;
 		}
 		i++;
 	}
-	return ret;
+	return 0;
 }
 
 void strcopy(char* dest, char* src) {
@@ -442,7 +413,7 @@ void printInt(int num) {
 	int ASCII_VALUE = 48;
 	int numTemp;
 	int i, j;
-	char charTemp;
+	//char charTemp;
 	int ctr = 0;
 	 
 
@@ -450,16 +421,12 @@ void printInt(int num) {
 		printStr("-");
 
 	num = absoluteVal(num);
-	numTemp = num;
 
 	if(num == 0) {
 		printStr("0");
 	} else {
-		while(numTemp > 0)
-		{
-			numTemp /= 10;
-			ctr++;	
-		}
+		for(numTemp = num; numTemp > 0; ctr++, numTemp /=10);
+		
 		numTemp = num;
 		//if(ctr >= 8) {
 			for(i = 0; i < 8; i++)
@@ -606,108 +573,93 @@ void commandMarquee() {
 	clrstr(mar.str);
 }
 
-void doCommand() {
+void commandRun(int* ptr) {
+	if(strcmp(param, "prog1") == 0) {
+		createProcess(ptr, (int)&prog1, 1);
+	} else if(strcmp(param, "prog2") == 0) {
+		createProcess(ptr, (int)&prog2, 2);
+	} else if(strcmp(param, "prog3") == 0) {
+		createProcess(ptr, (int)&prog3, 3);
+	} else if(strcmp(param, "prog4") == 0) {
+		createProcess(ptr, (int)&prog4, 4);
+	} else if(strcmp(param, "prog5") == 0) {
+		createProcess(ptr, (int)&prog5, 5);
+	} else {
+		printStr("Program does not exist\n");
+	}
+}
+
+void doCommand(int* ptr) {
+	int prog;
+	int i;
+
 	getCommand();
-	
-	if(strcmp(command, "say") == 0) {
+	if(currProg == 0) {
+		i = ParseInt(command);
+		restore(ptr, i);
+	}else if(strcmp(command, "say") == 0) {
 		printStr("\n");		
 		commandSay();	
 		printStr("\n");
+		printStr(headline);
 	}else if(strcmp(command, "add") == 0) {
 		printStr("\n");		
 		commandAdd();
 		printStr("\n");
+		printStr(headline);
 	}else if(strcmp(command, "cls") == 0) {
-		clrscr();	
+		clrscr();
+		printStr(headline);	
 	}else if(strcmp(command, "marquee") == 0){
 		printStr("\n");
 		commandMarquee();
 		printStr("\n");
+		printStr(headline);
 	}else if(strcmp(command, "clrline") == 0){
 		clrLine(row);
 		printStr("\n");
-	}else{
+		printStr(headline);
+	}else if(strcmp(command, "run") == 0) {
+		printStr("\n");
+		commandRun(ptr);
+	} else {
 		printStr("\nInvalid Command\n");
+		printStr(headline);
 	}
 
 	clearBuffer();
-	printStr(headline);
 }
-process is love! Bakit ka ganito?!
+
 int isChar(char key) {
 	if(key >= 32 && key <= 126)
 		return 1;
 	else return 0;
 }
 
-void backup(int* ptr) {
-	if(currProg == 0) {
-		prgMain = (int)*ptr;
-	} else if(currProg == 1) 
-	{
-		PCS[0].ebp = ptr[0];
-		PCS[0].eip = ptr[1];
-		PCS[0].esp = ptr[-1];
-
-	} else if(currProg == 2) {
-		PCS[1].ebp = ptr[0];
-		PCS[1].eip = ptr[1];
-		PCS[1].esp = ptr[-1];
-	}
-}
-//oh my god look at that FACE
-void restore(int* ptr)
-{
-	if(currProg == 0) 
-	{
-		prgMain = (int)*ptr;
-	} 
-	else if(currProg == 1) 
-	{
-		ptr[0] = PCS[0].ebp;
-		PCS[0].stack[1023] = PCS[0].eip;
-		PCS[0].esp-=4;
-		ptr[-1]=PCS[1].esp;
-
-	} else if(currProg == 2) {
-		PCS[1].ebp = ptr[0];
-		PCS[1].eip = ptr[1];
-		PCS[1].esp = ptr[-1];
-	}	
-}
 void processKey(char key, int* ptr) {
 	char in = keyboard_map[key];
-
+	
 	if(cap_flag == 1 && in != '\b' && in == '\n')
 		in -= 32;
-
 	if(key < 0)
 		return;
-	else if(keyboard_map[key] == '1'){
-		backup(ptr);
-		currProg = 1;
-			restore(ptr);
-
-	} else if (keyboard_map[key] == '2') {
-		backup(ptr);			
-		currProg = 2;
-			restore(ptr);		
-	}
-
 	else if(in == '\n'){
 		if(buffer_counter != 0) 
-			doCommand();
+			doCommand(ptr);
 		else {
 			printStr("\n");
 			printStr(headline);	
 		}
+	} else if(keyboard_map[key] == '`') {
+		backup(ptr);
+		restore(ptr, 0);
 	} else if(keyboard_map[key] == '\b' && buffer_counter > 0) {
 		vidptr[cursor-2] = ' ';
 
 		console_buffer[buffer_counter] = '\0';
 		buffer_counter--;
 		col--;
-	}else { 
+	} else { 
 	
 		vidptr[cursor] = keyboard_map[key];
 		vidptr[cursor+1] = WHITE;
@@ -717,6 +669,50 @@ void processKey(char key, int* ptr) {
 		console_buffer[buffer_counter] = '\0';
 		col++;	
 	} 
+	
+	moveCursor();
+}
+
+void createProcess(int* ptr, int prog, int progNum) {
+	backup(ptr);
+	PCS[PCS_CTR].progNum = progNum;
+	PCS[PCS_CTR].ebp = (int)&(PCS[PCS_CTR].stack[1024]); 
+	PCS[PCS_CTR].esp = (int)&(PCS[PCS_CTR].stack[1024]);
+	PCS[PCS_CTR].eip = prog;
+	
+	restore(ptr, PCS_CTR);
+	PCS_CTR++;
+}
+
+void backup(int* ptr) {
+	int i;
+	
+	PCS[currProg].ebp = ptr[0];
+	PCS[currProg].eip = ptr[1];
+	PCS[currProg].esp = ptr[-1];
+
+	for(i = 0; i < SCREENSIZE; i++) {
+		PCS[currProg].screen[i] = vidptr[i];
+	}
+	PCS[currProg].col = col;
+	PCS[currProg].row = row;
+}
+
+void restore(int* ptr, int PCS_index) {
+	int i;
+	clrscr();
+	
+	currProg = PCS_index;
+	ptr[0] = PCS[PCS_index].ebp;	
+	ptr[1] = PCS[PCS_index].eip;
+	ptr[-1] = PCS[PCS_index].esp;
+	
+	for(i = 0; i < SCREENSIZE; i++) {
+		vidptr[i] = PCS[PCS_index].screen[i];	
+	}
+	col = PCS[PCS_index].col;
+	row = PCS[PCS_index].row;
+	
 	moveCursor();
 }
 
@@ -724,18 +720,13 @@ void keyboard_handler_main(int* ptr) {
 	unsigned char status;
 	char keycode;
 
-	
 	status = read_port(KEYBOARD_STATUS_PORT);
 	/* Lowest bit of status will be set if buffer is not empty */
-	if (status & 0x01) {
-		keycode = read_port(KEYBOARD_DATA_PORT);
-		if(keycode == 0x3A) {
-			if(cap_flag == 0)
-				cap_flag = 1;
-			else cap_flag = 0;		
-		} else processKey(keycode, ptr);
-	}
 	
+		if (status & 0x01) {
+			keycode = read_port(KEYBOARD_DATA_PORT);
+			processKey(keycode, ptr);
+		}
 	
 	/* write EOI */
 	write_port(0x20, 0x20);
@@ -743,12 +734,11 @@ void keyboard_handler_main(int* ptr) {
 
 void timer_handler_main(void) {
 	int ctr;
-	
-	write_port(0x20, 0x20);
 
 	for(ctr = 0; ctr < MRQ_CTR; ctr++) {
 		moveMarquee(&MRQ[ctr]);
 	}
+	write_port(0x20, 0x20);
 }
 
 void moveMarquee(struct marquee* mar) {
@@ -791,34 +781,37 @@ char* findOption() {
 		return console_option;
 	} else return "0"; 
 }
-/*
-int test(int* ptr, int x) {
-	x--;
-	
-	*ptr = (int)(&test2);
-	return 100;
-	
-}*/
-/*
-int test2() {
-	printStr("Test2");
+
+void switchProg() {
+	int i;
+	printStr("Program List:\n");
+	for(i = 1; i < PCS_CTR; i++) {
+		printStr("[");
+		printInt(i);
+		printStr("] ");
+		switch(PCS[i].progNum) {
+			case 0: printStr("console"); break;
+			case 1: printStr("prog1"); break;
+			case 2: printStr("prog2"); break;
+			case 3: printStr("prog3"); break;
+			case 4: printStr("prog4"); break;
+			case 5: printStr("prog5"); break;
+		}printStr("\n");
+	}
 	while(1);
-	return 70;
 }
-*/
+
 void prog1()
 {
 	int x = 0, n = 0,i=0;
 	while(1)
-	{
-		
+	{	
 		printInt(x);
 		printStr(" ");		
 		for(n=0; n<9999; n++)
 			for(i=0; i<9999; i++);
 		x++;
 	}
-	
 }
 
 void prog2()
@@ -833,16 +826,20 @@ void prog2()
 			for(i=0; i<9999; i++);
 		x += 2;
 	}
-	
+}
+
+void prog3(){
+}
+
+void prog4(){
+}
+
+void prog5(){
 }
 
 void kmain(void)
-{	int i = 0;
+{
 	idt_init();
-	currProg = 0;
-	prg1 = (int)(&prog1);
-	prg2 = (int)(&prog2);
-	prgMain = (int)(&kmain);
 
 	clrscr();
 	printStr("\n");	

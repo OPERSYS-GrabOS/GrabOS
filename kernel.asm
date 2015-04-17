@@ -18,7 +18,7 @@ global load_idt
 global timer_handler
 global asmtest
 
-extern kmain	        
+extern kmain	
 extern keyboard_handler_main
 extern timer_handler_main
 extern test
@@ -44,16 +44,22 @@ write_port:
 	ret
 	
 ;KEYBOARD Interrupt Handling
-keyboard_handler:     
-	push 	ebp	
+keyboard_handler:
+	push 	ebp
 	push	esp
-            
-	call    keyboard_handler_main
-	
-	pop	edx
-	pop	ebp
-	mov esp, edx
 
+	call 	keyboard_handler_main
+	
+	pop 	ebx
+	pop 	ebp
+	pop	eax
+	pop	edx
+	pop	ecx
+
+	mov	esp, ebx
+	push 	ecx
+	push	edx
+	push	eax
 	iretd
 
 ;TIMER Interrupt Handling
